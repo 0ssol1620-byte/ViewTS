@@ -12,6 +12,9 @@ Key ideas:
 - Error-image capture and archiving
 - Extensible action system (`actions_base.py` / `actions_impl.py` / `action_registry.py`)
 
+<img width="940" height="509" alt="image" src="https://github.com/user-attachments/assets/f256a6b1-8891-4d5c-837a-07a883a0c50c" />
+
+
 ---
 
 ## Features
