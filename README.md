@@ -169,7 +169,7 @@ ViewTS/
 
 ---
 
-## Architecture Diagram (Mermaid)
+## Architecture Diagram
 
 ```mermaid
 flowchart LR
