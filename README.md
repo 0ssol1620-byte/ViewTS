@@ -1,130 +1,95 @@
-# ViewTS – Vieworks Test Suite
+# ViewTS – Vieworks Camera Test Suite
 
-ViewTS is a PyQt5-based **camera test and validation suite** for Vieworks cameras using
+**ViewTS** (Vieworks Test Suite) is a PyQt5-based **camera test and validation suite** for Vieworks cameras using
 Euresys Coaxlink + eGrabber. It provides a reproducible sequence engine, rich GUI, and
 various utilities for camera bring-up, regression testing, and reliability verification.
 
-Key ideas:
+The goal of ViewTS is:
 
-- Multi-camera support via a centralized controller pool
-- JSON-based test sequences (start/stop, parameter sweeps, reliability scenarios)
-- Real-time tiled live view with automatic down-scaling in a background worker
-- Error-image capture and archiving
-- Extensible action system (`actions_base.py` / `actions_impl.py` / `action_registry.py`)
+> To let **non-programmers** (test engineers, FA/AE, production operators)  
+> run **repeatable, automated camera tests** through a friendly UI –  
+> while still giving developers a clean, extensible Python codebase.
 
 <img width="940" height="509" alt="image" src="https://github.com/user-attachments/assets/f256a6b1-8891-4d5c-837a-07a883a0c50c" />
 
+---
+
+## Table of Contents
+
+1. [Key Concepts & Benefits](#key-concepts--benefits)  
+2. [Typical Use Cases](#typical-use-cases)  
+3. [High-level Architecture](#high-level-architecture)  
+4. [UI Overview – How to Use ViewTS Without Coding](#ui-overview--how-to-use-viewts-without-coding)  
+   - [Main Window](#main-window)  
+   - [Device Manager Dock](#device-manager-dock)  
+   - [Camera Status Dock](#camera-status-dock)  
+   - [Live View & Mosaic View](#live-view--mosaic-view)  
+   - [Sequence Editor](#sequence-editor)  
+   - [Error Images Tab](#error-images-tab)  
+5. [Core Engine & Internals](#core-engine--internals)  
+6. [Requirements & Installation](#requirements--installation)  
+7. [Running ViewTS](#running-viewts)  
+8. [Extending ViewTS (for Developers)](#extending-viewts-for-developers)  
+9. [Limitations & Notes](#limitations--notes)
 
 ---
 
-## Features
+## Key Concepts & Benefits
 
-### Camera + System Initialization
+### What ViewTS does
 
-- Robust launcher (`main.py`) that:
-  - Sets up environment variables and plugin paths
-  - Initializes logging
-  - Initializes hardware via `src.core.initializer`
-  - Starts the Qt event loop with `MainWindow`
+- **Connects and manages multiple cameras** via Coaxlink + eGrabber.
+- Provides a **real-time tiled live view** with automatic down-scaling in a worker thread.
+- Executes **JSON-based test sequences** (connect → configure → grab → assert → log).
+- Captures and archives **error images** for failed steps or abnormal frames.
+- Logs test runs into structured logs (CSV + text logs).
 
-- Hardware initialization (`src/core/initializer.py`)
-  - Discovers and connects cameras through `CameraController`
-  - Registers controllers in a global `controller_pool`
-  - Logs the number of connected cameras and reports fatal errors if initialization fails
+### Who it is for
 
-### Action & Sequence Engine
+- **Camera R&D / Validation engineers**  
+  - Create repeatable test scenarios (link test, exposure sweep, thermal test…)
+- **Field application & support engineers (FAE/AE)**  
+  - Quickly reproduce issues on customer setups  
+  - Provide portable test projects for customers
+- **Production line / reliability engineers**  
+  - Long-run stress tests, link stability checks, frame loss monitoring
+- **Non-programmer operators**  
+  - Run pre-defined test sequences via the GUI without writing code
 
-- **Action definitions**
+### Key benefits
 
-  - `src/core/actions_base.py`: base types (`ActionDefinition`, `ActionArgument`,
-    `ActionResult`, etc.)
-  - `src/core/action_registry.py`: central registry for all actions, mapping action IDs
-    (e.g. `"connect_camera"`, `"set_parameter"`) to metadata
-
-- **Action implementations**
-
-  - `src/core/actions_impl.py`: `execute_*` functions for:
-    - Connecting/disconnecting cameras
-    - Changing GenICam features (exposure, gain, link count, trigger mode, etc.)
-    - Grabbing frames, checking link status, asserting feature values
-    - Monitoring frame loss (`FrameLossMonitor`)
-
-- **Sequence types & coordinator**
-
-  - `src/core/sequence_types.py`: dataclasses for `SequenceStep`, `Sequence`, loop
-    constructs, error policies (`continue_on_fail`, etc.), and JSON
-    (de-)serialization helpers
-  - `src/core/sequence_runner.py` and `src/core/sequence_coordinator.py`: run sequences,
-    handle branching/looping, and orchestrate actions and context
-  - `src/core/multi_runner_manager.py`: manages multiple running sequences
-
-- **Backtest examples**
-
-  - `src/backtest/*.py` and `src/backtest/*.json`: ready-made sequences for
-    - link-trigger tests
-    - multi-frame acquisition and stop tests
-    - brightness sweep tests
-    - reliability / long-run sequences for specific camera models
-
-### GUI
-
-The GUI lives in `src/ui` and is built on **PyQt5**.
-
-- **Main window**
-
-  - `src/ui/main_window.py`
-  - Central hub that wires together docks and tabs:
-    - Device manager dock
-    - Camera status dock
-    - Sequence editor
-    - Error image tab
-    - Mosaic or single-camera live view
-
-- **Live view & grabbing**
-
-  - `src/ui/grab_worker.py`
-    - Background `QThread` that drains frames from one or more cameras
-    - Uses a fast down-scaling path (via NumPy + optional `cv2.resize`) to deliver
-      ready-to-paint `QImage` objects
-  - `src/ui/live_view_widget.py` and `src/ui/mosaic_live_widget.py`
-    - Display live tiles, handle resize events, and forward new target widths back
-      to `GrabWorker`
-
-- **Camera controls and status**
-
-  - `src/ui/camera_settings_dialog.py`: popup dialog to control camera parameters
-  - `src/ui/camera_status_dock.py`: per-camera status (link status, FPS, error counters)
-  - `src/ui/device_manager_dock.py`: list of connected devices and connect/disconnect actions
-
-- **Sequences & error images**
-
-  - `src/ui/sequence_editor_widget.py`: UI for editing and running JSON-based sequences
-  - `src/ui/error_images_tab.py`: shows error frames captured by `error_image_manager.py`
-    for quick inspection
-
-### Utilities
-
-Residing in `src/utils`:
-
-- `logging_setup.py` – initializes the logging system (console + file handlers)
-- `image_utils.py` – image helpers:
-  - `fast_resize()`, `make_thumbnail()`
-  - `save_frame()` / `archive_error_image()` (automatic BMP, robust fallback)
-  - `compare_frames_advanced()` and `is_scrambled_image()` using SSIM
-  - `calculate_stats()`
-- `camera_parameters_model.py`
-  - Loads camera XML files and builds a parameter map
-  - Provides helpers to list parameter names and possible values
-- `csv_logger.py`
-  - Structured CSV logging for measurement results or regression logs
-- `memento_recorder.py`
-  - Integration point for Euresys Memento logging
-- `sandbox.py`
-  - Experimental scripts and scratchpad utilities
+- ✅ **No scripting required for users** – sequences are data-driven (JSON); users operate via UI  
+- ✅ **Repeatable** – the same sequence can be run by different people & sites  
+- ✅ **Traceable** – logs + error images show exactly what happened and when  
+- ✅ **Extendable** – developers can add new actions in Python without touching UI code  
+- ✅ **Safe** – sequence engine supports error policies, loops, and guard rails
 
 ---
 
-## Project Structure
+## Typical Use Cases
+
+1. **Smoke test for a new camera**
+   - Connect camera, open live view, verify FPS, exposure, link status.
+   - Run a “basic_camera_test” sequence from the backtest examples.
+
+2. **Reliability / burn-in test**
+   - Run a long sequence that:
+     - Changes exposure / gain / trigger modes
+     - Performs continuous grabbing
+     - Monitors frame loss and error counters
+     - Captures error images if something goes wrong
+
+3. **Regression test for firmware / driver updates**
+   - Reuse the same sequences across firmware or SDK versions.
+   - Compare logs and error images before/after changes.
+
+4. **Customer reproduction**
+   - Encode customer’s scenario as a JSON sequence.
+   - Share a `ViewTS` bundle; the customer runs the same test without coding.
+
+---
+
+## High-level Architecture
 
 ```text
 ViewTS/
@@ -167,86 +132,268 @@ ViewTS/
          └─ sandbox.py
 ```
 
----
+At a glance:
 
-## Architecture Diagram
-
-```mermaid
-flowchart LR
-    subgraph HW[Hardware]
-        Cam["Camera(s)
-(Coaxlink + eGrabber)"]
-    end
-
-    subgraph Core
-        CC[camera_controller.py]
-        CP[controller_pool.py]
-        AR[action_registry.py]
-        AB[actions_base.py]
-        AI[actions_impl.py]
-        ST[sequence_types.py]
-        SR[sequence_runner.py]
-        SC[sequence_coordinator.py]
-        MM[multi_runner_manager.py]
-        EIM[error_image_manager.py]
-    end
-
-    subgraph UI
-        MW[main_window.py]
-        LV[live_view_widget.py
-mosaic_live_widget.py]
-        DMD[device_manager_dock.py]
-        CSD[camera_status_dock.py]
-        CSET[camera_settings_dialog.py]
-        SEQ[sequence_editor_widget.py]
-        ERR[error_images_tab.py]
-    end
-
-    subgraph Utils
-        IMG[image_utils.py]
-        LOG[logging_setup.py]
-        CPM[camera_parameters_model.py]
-        CSV[csv_logger.py]
-    end
-
-    Cam --> CC --> CP
-
-    AR --> AI
-    AB --> AI
-    AI --> SR
-    ST --> SR
-    SR --> SC
-    SC --> MM
-    CC --> SR
-    EIM --> ERR
-
-    MW --> LV
-    MW --> DMD
-    MW --> CSD
-    MW --> CSET
-    MW --> SEQ
-    MW --> ERR
-
-    LV --> IMG
-    MW --> LOG
-    MW --> CSV
-    MW --> CPM
-```
+- **`core/`** – “brain” of the system (cameras, actions, sequences, error images).
+- **`ui/`** – visual layer only; talks to `core` via signals/slots and public APIs.
+- **`utils/`** – logging, image helpers, camera parameter model, CSV logging.
+- **`backtest/`** – real-world test scenarios as JSON + scripts.
 
 ---
 
-## Dependencies
+## UI Overview – How to Use ViewTS Without Coding
+
+This section explains the UI from a **non-programmer user** perspective.
+
+### Main Window
+
+The main window (from `src/ui/main_window.py`) acts as a dashboard:
+
+- Top menu / toolbar (depending on configuration)
+- Left/right **docks**:
+  - Device Manager
+  - Camera Status
+  - Sequence Editor
+- Central area:
+  - Live View or Mosaic Live view
+- Bottom:
+  - Status bar (current sequence, camera status, hints)
+
+You can **rearrange docks** (drag, float, dock) just like in typical Qt applications.
+
+---
+
+### Device Manager Dock
+
+Implemented in `device_manager_dock.py`.
+
+Typical capabilities:
+
+- **List of available cameras**
+  - Shows device IDs, model names, serials, etc. (depending on SDK)
+- **Connect / Disconnect buttons**
+  - Select a camera → click *Connect* to open it
+  - Disconnect when you want to free the resource or switch cables
+- **Link information**
+  - Link status (connected / disconnected)
+  - Optional link speed / lane configuration (depending on how it is wired to `CameraController`)
+
+**Why it’s useful (for non-programmers):**
+
+> You don’t need to know SDK APIs or run sample code.  
+> Just pick your camera from a list and click **Connect**.
+
+---
+
+### Camera Status Dock
+
+Implemented in `camera_status_dock.py`.
+
+Shows live, read-only status information per camera, such as:
+
+- Current **FPS** and frame count
+- Exposure / gain (sometimes also ROI, binning, etc.)
+- Link count / link state
+- Event counters (errors, frame drops, resends…)
+
+**Typical usage:**
+
+- Verify that the camera is **running at expected FPS**.  
+- Check that exposure / gain are in the expected range.  
+- During long tests, keep an eye on **frame loss counters**.
+
+---
+
+### Live View & Mosaic View
+
+Implemented in:
+
+- `live_view_widget.py` – per-camera live widget  
+- `mosaic_live_widget.py` – grid/tiled view  
+- `grab_worker.py` – background thread feeding frames to the UI  
+
+Features:
+
+- **Real-time display** of camera images  
+- Automatic **down-scaling in a worker thread** (using NumPy + optional `cv2`)  
+- Each tile can:
+  - Show last frame
+  - Resize smoothly as you resize the main window
+  - Update target width back to `GrabWorker` so it knows how big to scale
+
+**Why it’s nice:**
+
+- UI remains **responsive** even with multiple cameras, because all heavy image
+  processing happens in `GrabWorker` (a `QThread`) instead of the main thread.
+- You can **visually confirm**:
+  - Exposure changes
+  - Motion blur
+  - Trigger timing
+  - Line/area sensor behavior
+
+---
+
+### Sequence Editor
+
+Implemented in `sequence_editor_widget.py`, backed by:
+
+- `core/action_registry.py`  
+- `core/sequence_types.py`  
+- `core/sequence_runner.py`  
+- `core/sequence_coordinator.py`  
+
+Concept:
+
+> A **sequence** is a list of **steps**.  
+> Each step calls an **action** with some parameters (e.g. “connect camera”, “set exposure”, “grab N frames”, “assert feature value”).
+
+From the UI, you typically see:
+
+- A **list/table of steps** (ID, action name, parameters, notes).  
+- Buttons:
+  - Load sequence from JSON
+  - Save sequence to JSON
+  - Run / Stop
+- A log pane for sequence messages (depending on configuration).
+
+Examples of actions:
+
+- `connect_camera`  
+- `disconnect_camera`  
+- `set_parameter` (e.g. ExposureTime, Gain)  
+- `assert_feature` (e.g. check LinkCount == 2)  
+- `start_grab`, `stop_grab`, `flush_and_grab`  
+- Custom test actions defined in `actions_impl.py`  
+
+**For non-programmers:**
+
+- You **edit steps in a structured table**, not in code.  
+- JSON is used as storage, but you don’t have to hand-edit JSON –  
+  you can do most work via UI and only export/import files as needed.  
+- Loops, error policies (`continue_on_fail`) and context variables are handled
+  internally – the UI just exposes the important knobs.
+
+---
+
+### Error Images Tab
+
+Implemented in `error_images_tab.py`, using logic from `error_image_manager.py`.
+
+Behavior:
+
+- Whenever a sequence detects an anomaly or assertion failure, the system can:
+  - **Save the offending frame** to disk  
+  - Record metadata about which step/test it belongs to
+- The Error Images tab then:
+  - Lists saved error images  
+  - Shows basic metadata (timestamp, camera ID, test name, etc.)  
+  - Allows the user to open or inspect error frames  
+
+Why this matters:
+
+- For reliability tests, it’s not enough to know “something failed” –  
+  you want to **see the actual image** that caused the failure.  
+- You can later reuse error frames in:
+  - Bug reports  
+  - Internal analysis  
+  - Comparative tests across firmware/hardware versions  
+
+---
+
+## Core Engine & Internals
+
+This section is mainly for developers and power users.
+
+### Camera Controller & Pool
+
+- `camera_controller.py`  
+  - Wraps eGrabber (real or dummy) to provide:
+    - Discover / connect / disconnect
+    - Start/stop grabbing
+    - Frame acquisition (single or continuous)
+    - Parameter access (`get_param`, `set_param`)
+  - Holds logic for:
+    - Handling DMA/driver queues
+    - Integrating with Euresys Memento (via `_find_memento_cli()` etc.)
+
+- `controller_pool.py`  
+  - Global registry of `CameraController` instances  
+  - Provides `list_ids()`, `get(id)`, `broadcast(...)`  
+  - Keeps multi-camera setups manageable
+
+### Action System
+
+- `actions_base.py`  
+  - Defines `ActionDefinition`, `ActionArgument`, `ActionResult`, etc.
+
+- `action_registry.py`  
+  - Central registry mapping action IDs → definitions  
+  - Used by both the **sequence engine** and the **UI** (for validation and labels)
+
+- `actions_impl.py`  
+  - Concrete `execute_*` functions  
+  - Uses `egrabber.query` and `CameraController` to:
+    - Change GenICam features
+    - Perform grabs
+    - Monitor frame loss, etc.
+
+### Sequence Engine
+
+- `sequence_types.py`  
+  - Dataclasses representing:
+    - `SequenceStep`  
+    - `Sequence`  
+    - Loop expressions and exit conditions  
+    - Error policy flags (`continue_on_fail`, etc.)  
+  - JSON (de-)serialization helpers so sequences can be stored in files.
+
+- `sequence_runner.py`  
+  - Executes sequences step-by-step.
+
+- `sequence_coordinator.py`  
+  - Orchestrates multiple sequences and manages shared context.
+
+- `multi_runner_manager.py`  
+  - Manages multiple runners (e.g., for multi-camera or multi-sequence scenarios).
+
+### Utilities
+
+- `image_utils.py`  
+  - `fast_resize`, `make_thumbnail` for light-weight scaling  
+  - `save_frame`, `archive_error_image` (robust BMP saves with dtype handling)  
+  - SSIM-based comparison & scrambled-image detection (via `skimage.metrics.ssim`)
+
+- `camera_parameters_model.py`  
+  - Parses camera XML files to build a parameter map  
+  - Provides high-level helpers for UI controls (drop-downs, etc.)
+
+- `csv_logger.py`  
+  - Structured CSV logging for test results
+
+- `logging_setup.py`  
+  - Unified logging configuration (console + rotating files)
+
+---
+
+## Requirements & Installation
+
+### Python & OS
+
+- **Python**: 3.8+ recommended  
+- **OS**: Windows is the primary target (Coaxlink + eGrabber),  
+  though parts of the code can run on other platforms for development.
+
+### Python dependencies
 
 From the source code under `src/`, the project relies on the following external libraries:
 
-- `PyQt5` – GUI (Qt Widgets, Core, Gui)
-- `numpy` – frame buffers and numeric work
-- `opencv-python` (`cv2`) – fast resizing and image conversions for thumbnails/live view
-- `scikit-image` – SSIM-based comparison (`skimage.metrics.structural_similarity`)
-- `egrabber` – Euresys Coaxlink / eGrabber camera SDK (Python bindings)
-- `GenApi` – GenICam / eGrabber related; typically installed with the vendor SDK, not via `pip`
+- `PyQt5` – GUI (Qt Widgets, Core, Gui)  
+- `numpy` – frame buffers and numeric work  
+- `opencv-python` (`cv2`) – fast resizing and image conversions for thumbnails/live view  
+- `scikit-image` – SSIM-based comparison (`skimage.metrics.structural_similarity`)  
+- `egrabber` – Euresys Coaxlink / eGrabber camera SDK (Python bindings)  
 
-Based on the environment information you shared earlier, a concrete `requirements.txt` can be:
+A concrete `requirements.txt` aligned with your environment might look like:
 
 ```text
 PyQt5==5.15.11
@@ -256,23 +403,15 @@ scikit-image==0.21.0
 egrabber==25.3.2.80
 ```
 
-> Note  
-> - `GenApi` is usually provided as part of the camera SDK installation and is **not**
->   normally installed via `pip`, so it is not listed in `requirements.txt`.
+> **Note**  
+> - `GenApi` and related components are usually installed as part of the camera SDK  
+>   and are not normally installed via `pip`.  
 > - `PyQt5-Qt5` and `PyQt5_sip` are pulled in automatically with `PyQt5`.
 
----
+### SDK & Drivers
 
-## Installation
-
-```bash
-pip install -r requirements.txt
-```
-
-Hardware SDK and drivers:
-
-- Install Euresys Coaxlink drivers and eGrabber SDK (including Python bindings).
-- Make sure the GenICam/GenApi components shipped with the SDK are visible on the system path.
+- Install **Euresys Coaxlink** drivers and **eGrabber SDK** (including Python bindings).  
+- Ensure GenICam/GenApi components are correctly installed and visible to the SDK.
 
 ---
 
@@ -281,21 +420,69 @@ Hardware SDK and drivers:
 From the `ViewTS-main` directory:
 
 ```bash
+pip install -r requirements.txt
 python main.py
 ```
 
-On Windows you may also package the application using PyInstaller; the launcher
-is designed to cope with PyInstaller’s runtime directory (for icons, plugins, etc.)
-if you mirror the structure used in the original project.
+If the SDK and drivers are correctly installed and a camera is connected:
+
+1. The launcher will:
+   - Initialize logging  
+   - Initialize the hardware (`src/core/initializer.initialize_system()`)  
+   - Open the main window  
+
+2. The **Device Manager Dock** should list available cameras.  
+3. Connect a camera and check the **Live View** and **Camera Status**.
+
+You can start by:
+
+- Running a **basic test sequence** from `src/backtest/` (e.g., link trigger test).  
+- Watching **frame loss counters** and **error images** for anomalies.
 
 ---
 
-## Notes
+## Extending ViewTS (for Developers)
 
-- Without a physical camera and proper SDK installation, the application may fall
-  back to a limited or dummy mode for some operations.
-- To run real reliability tests and long sequences, you should:
-  - Connect the appropriate Vieworks cameras
-  - Configure Coaxlink/eGrabber properly
-  - Adjust the JSON sequences under `src/backtest/` or create your own via the
-    sequence editor.
+If you want to customize ViewTS:
+
+### Add a new action
+
+1. Define the action in `actions_base.py` or register it via `action_registry.py`.  
+2. Implement `execute_<your_action>(...)` in `actions_impl.py`.  
+3. Register it with an `ActionDefinition` so that:
+   - The **sequence engine** can call it.  
+   - The **UI** (sequence editor) knows its parameters and labels.
+
+### Add a custom sequence
+
+1. Create a JSON file under `src/backtest/` (or anywhere else).  
+2. Load it via the **Sequence Editor** UI.  
+3. Save/modify using the UI, or edit JSON manually for advanced flows.
+
+### Modify the UI
+
+- `main_window.py` orchestrates which docks and tabs are visible.  
+- You can:
+  - Add a new dock  
+  - Add new menu/toolbar actions  
+  - Connect signals/slots to your custom logic  
+
+---
+
+## Limitations & Notes
+
+- ViewTS targets **Euresys Coaxlink + eGrabber** ecosystems.  
+  Other frame grabbers or camera SDKs would require porting `camera_controller.py`
+  and related parts.
+- Without physical cameras and drivers:
+  - Some parts of the UI can run in “dummy” mode.  
+  - However, most real tests and sequences require actual hardware.
+- The sequence engine is powerful (loops, conditionals, error policies), so:
+  - For non-programmers, it is recommended to start from **example sequences**
+    in `src/backtest/` rather than building complex flows from scratch.
+
+---
+
+If you have specific usage scenarios (e.g., “test link recovery after cable pull”,
+“exposure sweep across 1000 frames”), you can encode them as sequences and reuse
+them across teams and sites – that’s the core strength of ViewTS.
